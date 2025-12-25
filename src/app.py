@@ -140,12 +140,26 @@ def knowledge_search(
     response_model=APIResponse[DocParseData],
     summary="文档解析",
     tags=["文档解析"],
+    openapi_extra={
+        "requestBody": {
+            "content": {
+                "multipart/form-data": {
+                    "example": {
+                        "file": "(binary)",
+                        "file_name": "电梯维保说明书.pdf",
+                        "file_type": "pdf",
+                        "output_format": "text",
+                    }
+                }
+            }
+        }
+    },
 )
 def doc_parse(
-    file: UploadFile = File(...),
-    file_name: str | None = Form(default=None),
-    file_type: str | None = Form(default=None),
-    output_format: str | None = Form(default=None),
+    file: UploadFile = File(..., description="上传文件"),
+    file_name: str | None = Form(default=None, description="原始文件名"),
+    file_type: str | None = Form(default=None, description="文件类型"),
+    output_format: str | None = Form(default=None, description="输出格式：text/html"),
 ) -> APIResponse[DocParseData]:
     name = file_name or file.filename or ""
     data = DocParseData(
