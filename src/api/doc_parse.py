@@ -4,6 +4,7 @@ import os
 import zipfile
 from typing import Optional
 
+import click
 import httpx
 from fastapi import APIRouter, File, Form, UploadFile
 from pydantic import BaseModel, Field
@@ -182,7 +183,102 @@ async def route(
     output_fmt = output_format or "text"
 
     try:
-        file_content = await file.read()
         return await parse_document(file_content, name, file_type, output_fmt)
     except Exception as e:
         return error_response(name, file_type)
+
+
+async def run_integration_tests(
+    api_url: str | None = None,
+    use_test_client: bool = False,
+    verbose: bool = False,
+) -> None:
+    """Run doc_parse integration tests."""
+    import io
+    import httpx
+
+    if verbose:
+        click.echo(f"\n{'=' * 50}")
+        click.echo("Running Doc Parse Integration Tests")
+        click.echo(f"API URL: {api_url or 'http://localhost:8000'}")
+        click.echo(f"Using TestClient: {use_test_client}")
+        click.echo(f"{'=' * 50}\n")
+
+    if use_test_client:
+        client = httpx.AsyncClient(base_url="http://test")
+    else:
+        client = httpx.AsyncClient(base_url=api_url or "http://localhost:8000")
+
+    test_cases = [
+        {
+            "name": "PDF text parsing",
+            "file_content": b"%PDF-1.0\n%PDF-1.4\n1 0 obj\n<< /Length 12 >>\nstream\nBT\nendstream\nendobj",
+            "filename": "test.pdf",
+            "file_type": "pdf",
+            "output_format": "text",
+        },
+        {
+            "name": "PDF HTML parsing",
+            "file_content": b"%PDF-1.0\n%PDF-1.4\n1 0 obj\n<< /Length 12 >>\nstream\nBT\nendstream\nendobj",
+            "filename": "test.html",
+            "file_type": "pdf",
+            "output_format": "html",
+        },
+    ]
+
+    passed = 0
+    failed = 0
+
+    for i, test_case in enumerate(test_cases, 1):
+        files = {
+            "file": (
+                test_case["filename"],
+                io.BytesIO(test_case["file_content"]),
+            ),
+            "file_type": test_case["file_type"],
+            "output_format": test_case["output_format"],
+        }
+
+        try:
+            if verbose:
+                click.echo(f"\nTest {i}: {test_case['name']}")
+
+            response = await client.post(
+                "/hitachi_elevator/doc/parse",
+                files=files,
+            )
+
+            if response.status_code == 200:
+                result = response.json()
+                if result.get("code") == 200:
+                    passed += 1
+                    if verbose:
+                        click.echo(
+                            f"  ✓ Passed - File: {result['data']['file_name']}, "
+                            f"Pages: {result['data']['page_count']}"
+                        )
+                else:
+                    failed += 1
+                    if verbose:
+                        click.echo(
+                            f"  ✗ Failed - Code: {result['code']}, Msg: {result['msg']}"
+                        )
+            else:
+                failed += 1
+                if verbose:
+                    click.echo(f"  ✗ Failed - Status: {response.status_code}")
+
+        except Exception as e:
+            failed += 1
+            if verbose:
+                click.echo(f"  ✗ Error - {str(e)}")
+
+    if verbose:
+        click.echo(f"\n{'=' * 50}")
+        click.echo(f"Tests Passed: {passed}")
+        click.echo(f"Tests Failed: {failed}")
+        click.echo(f"{'=' * 50}\n")
+
+    exit_code = 0 if failed == 0 else 1
+    if exit_code != 0:
+        raise click.ClickException("")

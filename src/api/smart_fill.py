@@ -1,7 +1,11 @@
+import asyncio
+import io
 import json
 import os
 from typing import Literal
 
+import click
+import httpx
 import openai
 from fastapi import APIRouter
 from pydantic import BaseModel, ConfigDict, Field
@@ -140,3 +144,107 @@ async def smart_fill(request: SmartFillRequest) -> APIResponse[SmartFillData]:
         return APIResponse(data=data)
     except Exception as e:
         return APIResponse(data=get_default_fill_data())
+
+
+async def run_integration_tests(
+    api_url: str | None = None,
+    use_test_client: bool = False,
+    verbose: bool = False,
+) -> None:
+    """Run smart_fill integration tests."""
+    import io
+
+    if verbose:
+        click.echo(f"\n{'=' * 50}")
+        click.echo("Running Smart Fill Integration Tests")
+        click.echo(f"API URL: {api_url or 'http://localhost:8000'}")
+        click.echo(f"Using TestClient: {use_test_client}")
+        click.echo(f"{'=' * 50}\n")
+
+    if use_test_client:
+        from ..app import app
+
+        client = httpx.AsyncClient(app=app, base_url="http://test")
+    else:
+        client = httpx.AsyncClient(base_url=api_url or "http://localhost:8000")
+
+    test_cases = [
+        {
+            "name": "mid call extraction",
+            "request": {
+                "session_id": "test_session_001",
+                "call_type": "mid",
+                "turn_id": 5,
+                "history": [
+                    {"role": "user", "text": "电梯停在12楼了"},
+                    {"role": "agent", "text": "请问具体地址？"},
+                ],
+            },
+        },
+        {
+            "name": "final call extraction",
+            "request": {
+                "session_id": "test_session_002",
+                "call_type": "final",
+                "turn_id": 10,
+                "history": [
+                    {"role": "user", "text": "电梯停在12楼了"},
+                    {"role": "agent", "text": "请问具体地址？"},
+                    {"role": "user", "text": "天河区体育西路123号"},
+                    {"role": "agent", "text": "联系电话？"},
+                    {"role": "user", "text": "13800138000"},
+                ],
+            },
+        },
+    ]
+
+    passed = 0
+    failed = 0
+
+    for i, test_case in enumerate(test_cases, 1):
+        try:
+            if verbose:
+                click.echo(f"\nTest {i}: {test_case['name']}")
+
+            response = await client.post(
+                "/hitachi_elevator/smart_fill",
+                json=test_case["request"],
+                timeout=60,
+            )
+
+            if response.status_code == 200:
+                result = response.json()
+                if result.get("code") == 200:
+                    passed += 1
+                    data = result.get("data", {})
+                    if verbose:
+                        complaint = data.get("complaint_content", {}).get("value", "")
+                        address = data.get("address", {}).get("value", "")
+                        click.echo(
+                            f"  ✓ Passed - complaint_content: {complaint[:30]}, address: {address[:30]}"
+                        )
+                else:
+                    failed += 1
+                    if verbose:
+                        click.echo(
+                            f"  ✗ Failed - Code: {result.get('code')}, Msg: {result.get('msg')}"
+                        )
+            else:
+                failed += 1
+                if verbose:
+                    click.echo(f"  ✗ Failed - Status: {response.status_code}")
+
+        except Exception as e:
+            failed += 1
+            if verbose:
+                click.echo(f"  ✗ Error - {str(e)}")
+
+    if verbose:
+        click.echo(f"\n{'=' * 50}")
+        click.echo(f"Tests Passed: {passed}")
+        click.echo(f"Tests Failed: {failed}")
+        click.echo(f"{'=' * 50}\n")
+
+    exit_code = 0 if failed == 0 else 1
+    if exit_code != 0:
+        raise click.ClickException("")

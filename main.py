@@ -3,6 +3,7 @@ import json
 from pathlib import Path
 
 import click
+import httpx
 import uvicorn
 import yaml
 from dotenv import load_dotenv
@@ -55,6 +56,42 @@ def export_openapi(output_format: str, output: Path | None) -> None:
 def check_external_service_command() -> None:
     """Check if all external services are accessible."""
     asyncio.run(check_external_services())
+
+
+@click.group()
+def test_group() -> None:
+    """Integration test commands."""
+
+
+@test_group.command("all")
+@click.option("--api-url", default="http://localhost:8000", help="External API URL")
+@click.option(
+    "--use-test-client/--no-use-test-client",
+    default=False,
+    help="Use FastAPI TestClient",
+)
+@click.option("--verbose", is_flag=True, help="Show detailed test output")
+def test_all_command(api_url: str, use_test_client: bool, verbose: bool) -> None:
+    """Run all integration tests."""
+    from src.api.doc_parse import run_integration_tests as test_doc_parse
+    from src.api.smart_fill import run_integration_tests as test_smart_fill
+    from src.api.trapped_detect import run_integration_tests as test_trapped_detect
+    from src.api.knowledge import run_integration_tests as test_knowledge
+    from src.api.sensitive import run_integration_tests as test_sensitive
+
+    if verbose:
+        click.echo(f"API URL: {api_url}")
+        click.echo(f"Using TestClient: {use_test_client}")
+        click.echo("=" * 50)
+
+    async def run_all():
+        await test_doc_parse(api_url, use_test_client, verbose)
+        await test_smart_fill(api_url, use_test_client, verbose)
+        await test_trapped_detect(api_url, use_test_client, verbose)
+        await test_knowledge(api_url, use_test_client, verbose)
+        await test_sensitive(api_url, use_test_client, verbose)
+
+    asyncio.run(run_all())
 
 
 if __name__ == "__main__":

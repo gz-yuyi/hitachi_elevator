@@ -2,6 +2,8 @@ import json
 import os
 from typing import Literal
 
+import click
+import httpx
 import openai
 from fastapi import APIRouter
 from pydantic import BaseModel, ConfigDict, Field
@@ -104,3 +106,107 @@ async def trapped_detect(
         return APIResponse(data=data)
     except Exception as e:
         return APIResponse(data=get_default_trapped_data())
+
+
+async def run_integration_tests(
+    api_url: str | None = None,
+    use_test_client: bool = False,
+    verbose: bool = False,
+) -> None:
+    """Run trapped_detect integration tests."""
+    import click
+
+    if verbose:
+        click.echo(f"\n{'=' * 50}")
+        click.echo("Running Trapped Detect Integration Tests")
+        click.echo(f"API URL: {api_url or 'http://localhost:8000'}")
+        click.echo(f"Using TestClient: {use_test_client}")
+        click.echo(f"{'=' * 50}\n")
+
+    if use_test_client:
+        from ..app import app
+
+        client = httpx.AsyncClient(app=app, base_url="http://test")
+    else:
+        client = httpx.AsyncClient(base_url=api_url or "http://localhost:8000")
+
+    test_cases = [
+        {
+            "name": "person trapped detection",
+            "request": {
+                "session_id": "test_session_001",
+                "turn_id": 1,
+                "role": "user",
+                "text": "电梯突然停了，我被困在里面了，帮忙联系维修！",
+            },
+        },
+        {
+            "name": "elevator malfunction",
+            "request": {
+                "session_id": "test_session_002",
+                "turn_id": 2,
+                "role": "user",
+                "text": "电梯停在12楼了，门打不开。",
+            },
+        },
+        {
+            "name": "uncertain scenario",
+            "request": {
+                "session_id": "test_session_003",
+                "turn_id": 3,
+                "role": "user",
+                "text": "好像有点问题",
+            },
+        },
+    ]
+
+    passed = 0
+    failed = 0
+
+    for i, test_case in enumerate(test_cases, 1):
+        try:
+            if verbose:
+                click.echo(f"\nTest {i}: {test_case['name']}")
+
+            response = await client.post(
+                "/hitachi_elevator/trapped_detect",
+                json=test_case["request"],
+                timeout=60,
+            )
+
+            if response.status_code == 200:
+                result = response.json()
+                if result.get("code") == 200:
+                    passed += 1
+                    data = result.get("data", {})
+                    if verbose:
+                        click.echo(
+                            f"  ✓ Passed - is_trapped: {data['is_trapped']}, "
+                            f"event_type: {data['event_type']}, "
+                            f"probability: {data['probability']}"
+                        )
+                else:
+                    failed += 1
+                    if verbose:
+                        click.echo(
+                            f"  ✗ Failed - Code: {result['code']}, Msg: {result['msg']}"
+                        )
+            else:
+                failed += 1
+                if verbose:
+                    click.echo(f"  ✗ Failed - Status: {response.status_code}")
+
+        except Exception as e:
+            failed += 1
+            if verbose:
+                click.echo(f"  ✗ Error - {str(e)}")
+
+    if verbose:
+        click.echo(f"\n{'=' * 50}")
+        click.echo(f"Tests Passed: {passed}")
+        click.echo(f"Tests Failed: {failed}")
+        click.echo(f"{'=' * 50}\n")
+
+    exit_code = 0 if failed == 0 else 1
+    if exit_code != 0:
+        raise click.ClickException("")
