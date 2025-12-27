@@ -4,8 +4,11 @@ from pathlib import Path
 import click
 import uvicorn
 import yaml
+from dotenv import load_dotenv
 
 from src.app import app
+
+load_dotenv()
 
 
 @click.group()
