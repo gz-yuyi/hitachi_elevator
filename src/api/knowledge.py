@@ -1,9 +1,13 @@
 from fastapi import APIRouter
 from pydantic import BaseModel, ConfigDict, Field
 
+from ..es import es_client
 from ..models import APIResponse
+from ..providers import embedding, rerank
 
 router = APIRouter()
+
+KNOWLEDGE_INDEX_PREFIX = "knowledge_"
 
 
 class KnowledgeContent(BaseModel):
@@ -218,13 +222,95 @@ class KnowledgeSearchRequest(BaseModel):
     page_num: int = Field(default=10, description="页码")
 
 
+async def create_knowledge_index(group: str):
+    index_name = f"{KNOWLEDGE_INDEX_PREFIX}{group}"
+    exists = await es_client.client.indices.exists(index=index_name)
+    if not exists:
+        mapping = {
+            "mappings": {
+                "properties": {
+                    "knowledge_id": {"type": "keyword"},
+                    "knowledge_group": {"type": "keyword"},
+                    "title": {"type": "text"},
+                    "is_message": {"type": "keyword"},
+                    "keyword": {"type": "text"},
+                    "busi_cata_id": {"type": "keyword"},
+                    "busi_cata_name": {"type": "text"},
+                    "click_count": {"type": "keyword"},
+                    "publish_date": {"type": "date", "format": "yyyy-MM-dd"},
+                    "eff_date": {"type": "date", "format": "yyyy-MM-dd"},
+                    "content": {"type": "text"},
+                    "sys_org_id": {"type": "keyword"},
+                    "sys_org_name": {"type": "text"},
+                    "update_time": {"type": "date", "format": "yyyy-MM-dd"},
+                    "queue_name": {"type": "keyword"},
+                    "exp_date": {"type": "date", "format": "yyyy-MM-dd"},
+                    "create_time": {"type": "date", "format": "yyyy-MM-dd"},
+                    "read_count": {"type": "keyword"},
+                    "label": {"type": "keyword"},
+                    "knowledge_type_name": {"type": "keyword"},
+                    "knowledge_type_path": {"type": "text"},
+                    "affair": {"type": "keyword"},
+                    "convergence": {"type": "boolean"},
+                    "is_bound_follow": {"type": "boolean"},
+                    "type_name_label": {"type": "keyword"},
+                    "content_vector": {
+                        "type": "dense_vector",
+                        "dims": 1024,
+                        "index": True,
+                        "similarity": "cosine",
+                    },
+                }
+            }
+        }
+        await es_client.client.indices.create(index=index_name, body=mapping)
+
+
+async def knowledge_upload(
+    request: KnowledgeUploadRequest,
+) -> APIResponse[None]:
+    for item in request.data:
+        await create_knowledge_index(item.knowledge_group)
+        index_name = f"{KNOWLEDGE_INDEX_PREFIX}{item.knowledge_group}"
+
+        content_text = "\n".join(
+            [f"{c.sub_title} {c.sub_context}" for c in item.contents if c.sub_context]
+        )
+
+        content_vector = await embedding(content_text)
+
+        doc = item.model_dump()
+        doc["content"] = content_text
+        doc["content_vector"] = content_vector
+
+        await es_client.client.index(
+            index=index_name,
+            id=item.knowledge_id,
+            document=doc,
+        )
+
+    return APIResponse()
+
+
 @router.post(
     "/hitachi_elevator/knowledge/upload",
     response_model=APIResponse[None],
     summary="知识上传",
     tags=["知识库"],
 )
-def knowledge_upload(_: KnowledgeUploadRequest) -> APIResponse[None]:
+async def route_upload(request: KnowledgeUploadRequest) -> APIResponse[None]:
+    try:
+        return await knowledge_upload(request)
+    except Exception as e:
+        return APIResponse(msg=str(e))
+
+
+async def knowledge_delete(
+    request: KnowledgeDeleteRequest,
+) -> APIResponse[None]:
+    for item in request.data:
+        index_name = f"{KNOWLEDGE_INDEX_PREFIX}{item.knowledge_group}"
+        await es_client.client.delete(index=index_name, id=item.knowledge_id)
     return APIResponse()
 
 
@@ -234,8 +320,17 @@ def knowledge_upload(_: KnowledgeUploadRequest) -> APIResponse[None]:
     summary="知识删除",
     tags=["知识库"],
 )
-def knowledge_delete(_: KnowledgeDeleteRequest) -> APIResponse[None]:
-    return APIResponse()
+async def route_delete(request: KnowledgeDeleteRequest) -> APIResponse[None]:
+    try:
+        return await knowledge_delete(request)
+    except Exception as e:
+        return APIResponse(msg=str(e))
+
+
+async def knowledge_need_follow(
+    request: KnowledgeNeedFollowRequest,
+) -> APIResponse[KnowledgeNeedFollowData]:
+    return APIResponse(data=KnowledgeNeedFollowData(need_follow=True))
 
 
 @router.post(
@@ -244,10 +339,75 @@ def knowledge_delete(_: KnowledgeDeleteRequest) -> APIResponse[None]:
     summary="是否需要知识跟随",
     tags=["知识库"],
 )
-def knowledge_need_follow(
-    _: KnowledgeNeedFollowRequest,
+async def route_need_follow(
+    request: KnowledgeNeedFollowRequest,
 ) -> APIResponse[KnowledgeNeedFollowData]:
-    return APIResponse(data=KnowledgeNeedFollowData(need_follow=False))
+    try:
+        return await knowledge_need_follow(request)
+    except Exception as e:
+        return APIResponse(msg=str(e))
+
+
+async def knowledge_follow(
+    request: KnowledgeFollowRequest,
+) -> APIResponse[list[KnowledgeFollowItem]]:
+    if not request.history:
+        return APIResponse(data=[])
+
+    query_text = request.history[-1]
+    query_vector = await embedding(query_text)
+
+    index_name = f"{KNOWLEDGE_INDEX_PREFIX}{request.knowledge_group}"
+
+    must_filters = []
+    if request.is_bound_follow:
+        must_filters.append({"term": {"is_bound_follow": False}})
+    if request.affair:
+        must_filters.append({"term": {"affair": request.affair}})
+    if request.knowledge_type_name:
+        type_names = [t.strip() for t in request.knowledge_type_name.split(",")]
+        must_filters.append({"terms": {"knowledge_type_name": type_names}})
+
+    knn_query = {
+        "knn": {
+            "field": "content_vector",
+            "query_vector": query_vector,
+            "k": request.top_k * 2,
+            "num_candidates": 100,
+        }
+    }
+
+    if must_filters:
+        knn_query["filter"] = {"bool": {"must": must_filters}}
+
+    search_body = {
+        "size": request.top_k * 2,
+        "_source": ["*"],
+        **knn_query,
+    }
+
+    response = await es_client.client.search(index=index_name, body=search_body)
+
+    hits = response["hits"]["hits"]
+    if not hits:
+        return APIResponse(data=[])
+
+    documents = [hit["_source"] for hit in hits]
+    document_texts = [doc.get("content", "") for doc in documents]
+
+    rerank_results = await rerank(document_texts, query_text)
+
+    top_results = []
+    for result in rerank_results[: request.top_k]:
+        idx = result.index
+        if idx < len(documents):
+            doc = documents[idx]
+            doc["score"] = result.relevance_score
+            doc["keywords"] = []
+            doc["matched_terms"] = []
+            top_results.append(KnowledgeFollowItem(**doc))
+
+    return APIResponse(data=top_results)
 
 
 @router.post(
@@ -256,10 +416,106 @@ def knowledge_need_follow(
     summary="知识跟随",
     tags=["知识库"],
 )
-def knowledge_follow(
-    _: KnowledgeFollowRequest,
+async def route_follow(
+    request: KnowledgeFollowRequest,
 ) -> APIResponse[list[KnowledgeFollowItem]]:
-    return APIResponse(data=[])
+    try:
+        return await knowledge_follow(request)
+    except Exception as e:
+        return APIResponse(data=[], msg=str(e))
+
+
+async def knowledge_search(
+    request: KnowledgeSearchRequest,
+) -> APIResponse[list[KnowledgeFollowItem]]:
+    index_name = f"{KNOWLEDGE_INDEX_PREFIX}{request.knowledge_group}"
+
+    must = []
+    if request.context_query:
+        must.append(
+            {
+                "query_string": {
+                    "fields": ["content", "title", "keyword"],
+                    "query": request.context_query,
+                }
+            }
+        )
+    if request.sys_org_name:
+        must.append({"match": {"sys_org_name": request.sys_org_name}})
+    if request.keyword:
+        keywords = request.keyword.split()
+        must.append(
+            {
+                "query_string": {
+                    "fields": ["content", "title", "keyword"],
+                    "query": " ".join(keywords),
+                }
+            }
+        )
+    if request.knowledge_type_name:
+        must.append({"term": {"knowledge_type_name": request.knowledge_type_name}})
+    if request.label:
+        must.append({"term": {"label": request.label}})
+    if request.is_bound_follow:
+        must.append({"term": {"is_bound_follow": False}})
+
+    filter_conditions = []
+    if request.queue_name:
+        queues = request.queue_name.split()
+        filter_conditions.append({"terms": {"queue_name": queues}})
+    if request.busi_cata_name:
+        cata_names = request.busi_cata_name.split()
+        filter_conditions.append({"terms": {"busi_cata_name": cata_names}})
+    if request.knowledge_type_path:
+        filter_conditions.append(
+            {"match": {"knowledge_type_path": request.knowledge_type_path}}
+        )
+
+    range_conditions = []
+    if request.publish_start and request.publish_end:
+        range_conditions.append(
+            {
+                "range": {
+                    "publish_date": {
+                        "gte": request.publish_start,
+                        "lte": request.publish_end,
+                    }
+                }
+            }
+        )
+
+    query = {"bool": {}}
+    if must:
+        query["bool"]["must"] = must
+    if filter_conditions:
+        query["bool"]["filter"] = filter_conditions
+    if range_conditions:
+        if "filter" in query["bool"]:
+            query["bool"]["filter"].extend(range_conditions)
+        else:
+            query["bool"]["filter"] = range_conditions
+
+    search_body = {
+        "query": query,
+        "from": (request.page_num - 1) * request.page_size,
+        "size": request.page_size,
+        "_source": ["*"],
+    }
+
+    if request.orderby_filed and request.orderby_sort:
+        search_body["sort"] = [{request.orderby_filed: {"order": request.orderby_sort}}]
+
+    response = await es_client.client.search(index=index_name, body=search_body)
+
+    hits = response["hits"]["hits"]
+    results = []
+    for hit in hits:
+        doc = hit["_source"]
+        doc["score"] = hit["_score"]
+        doc["matched_terms"] = []
+        results.append(KnowledgeFollowItem(**doc))
+
+    return APIResponse(data=results)
 
 
 @router.post(
@@ -268,7 +524,10 @@ def knowledge_follow(
     summary="知识搜索",
     tags=["知识库"],
 )
-def knowledge_search(
-    _: KnowledgeSearchRequest,
+async def route_search(
+    request: KnowledgeSearchRequest,
 ) -> APIResponse[list[KnowledgeFollowItem]]:
-    return APIResponse(data=[])
+    try:
+        return await knowledge_search(request)
+    except Exception as e:
+        return APIResponse(data=[], msg=str(e))
