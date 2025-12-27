@@ -10,7 +10,10 @@ from ..models import APIResponse
 
 router = APIRouter()
 
-client = openai.OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+client = openai.AsyncOpenAI(
+    api_key=os.getenv("OPENAI_API_KEY"),
+    base_url=os.getenv("OPENAI_BASE_URL"),
+)
 
 
 class TrappedDetectRequest(BaseModel):
@@ -39,13 +42,13 @@ class TrappedDetectData(BaseModel):
     evidence: str = Field(description="触发判断的关键短语")
 
 
-@router.post(
-    "/hitachi_elevator/trapped_detect",
-    response_model=APIResponse[TrappedDetectData],
-    summary="困人困梯检测",
-    tags=["困人困梯检测"],
-)
-def trapped_detect(request: TrappedDetectRequest) -> APIResponse[TrappedDetectData]:
+def get_default_trapped_data() -> TrappedDetectData:
+    return TrappedDetectData(
+        is_trapped=False, event_type="不确定", probability=0.0, evidence=""
+    )
+
+
+async def detect_trapped_event(role: str, text: str) -> TrappedDetectData:
     instruction = """这是一个电梯客服对话，请判断当前文本是否包含"电梯困人事件"。
 
 判断标准：
@@ -63,36 +66,41 @@ def trapped_detect(request: TrappedDetectRequest) -> APIResponse[TrappedDetectDa
 
 要求：probability为0-1之间的浮点数，表示判断的置信度。"""
 
+    response = await client.chat.completions.create(
+        model=os.getenv("OPENAI_MODEL", "gpt-4o"),
+        messages=[
+            {
+                "role": "system",
+                "content": "你是一个专业的电梯困人事件检测助手，需要快速准确判断对话内容是否涉及困人/困梯事件。",
+            },
+            {
+                "role": "user",
+                "content": f"{instruction}\n\n对话内容（{role}）：{text}",
+            },
+        ],
+        temperature=0.1,
+        max_tokens=200,
+    )
+
+    result_text = response.choices[0].message.content
+    if not result_text:
+        return get_default_trapped_data()
+
+    result_json = json.loads(result_text)
+    return TrappedDetectData(**result_json)
+
+
+@router.post(
+    "/hitachi_elevator/trapped_detect",
+    response_model=APIResponse[TrappedDetectData],
+    summary="困人困梯检测",
+    tags=["困人困梯检测"],
+)
+async def trapped_detect(
+    request: TrappedDetectRequest,
+) -> APIResponse[TrappedDetectData]:
     try:
-        response = client.chat.completions.create(
-            model=os.getenv("OPENAI_MODEL", "gpt-4o"),
-            messages=[
-                {
-                    "role": "system",
-                    "content": "你是一个专业的电梯困人事件检测助手，需要快速准确判断对话内容是否涉及困人/困梯事件。",
-                },
-                {
-                    "role": "user",
-                    "content": f"{instruction}\n\n对话内容（{request.role}）：{request.text}",
-                },
-            ],
-            temperature=0.1,
-            max_tokens=200,
-        )
-
-        result_text = response.choices[0].message.content
-        if not result_text:
-            return APIResponse(
-                data=TrappedDetectData(
-                    is_trapped=False, event_type="不确定", probability=0.0, evidence=""
-                )
-            )
-        result_json = json.loads(result_text)
-
-        return APIResponse(data=TrappedDetectData(**result_json))
+        data = await detect_trapped_event(request.role, request.text)
+        return APIResponse(data=data)
     except Exception as e:
-        return APIResponse(
-            data=TrappedDetectData(
-                is_trapped=False, event_type="不确定", probability=0.0, evidence=""
-            )
-        )
+        return APIResponse(data=get_default_trapped_data())

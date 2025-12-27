@@ -10,7 +10,10 @@ from ..models import APIResponse
 
 router = APIRouter()
 
-client = openai.OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+client = openai.AsyncOpenAI(
+    api_key=os.getenv("OPENAI_API_KEY"),
+    base_url=os.getenv("OPENAI_BASE_URL"),
+)
 
 
 class ChatTurn(BaseModel):
@@ -60,19 +63,17 @@ class SmartFillData(BaseModel):
     )
 
 
-@router.post(
-    "/hitachi_elevator/smart_fill",
-    response_model=APIResponse[SmartFillData],
-    summary="智能填单",
-    tags=["智能填单"],
-)
-def smart_fill(request: SmartFillRequest) -> APIResponse[SmartFillData]:
-    conversation = "\n".join(f"{turn.role}: {turn.text}" for turn in request.history)
+def get_default_fill_data() -> SmartFillData:
+    return SmartFillData()
 
+
+async def extract_fields_from_conversation(
+    conversation: str, call_type: str
+) -> SmartFillData:
     instruction = (
         "这是一个电梯故障维修的客服对话。请从对话中提取以下信息，返回JSON格式。\n"
     )
-    if request.call_type == "mid":
+    if call_type == "mid":
         instruction += "注意：这是中间过程调用，如果某个字段置信度低于70%或无法确定，请留空不要猜测。\n"
     else:
         instruction += (
@@ -101,27 +102,41 @@ def smart_fill(request: SmartFillRequest) -> APIResponse[SmartFillData]:
 }
 """
 
+    response = await client.chat.completions.create(
+        model=os.getenv("OPENAI_MODEL", "gpt-4o"),
+        messages=[
+            {
+                "role": "system",
+                "content": "你是一个专业的信息提取助手，擅长从客服对话中提取关键信息。",
+            },
+            {
+                "role": "user",
+                "content": f"{instruction}\n\n对话内容：\n{conversation}",
+            },
+        ],
+        temperature=0.3,
+    )
+
+    result_text = response.choices[0].message.content
+    if not result_text:
+        return get_default_fill_data()
+
+    result_json = json.loads(result_text)
+    return SmartFillData(**result_json)
+
+
+@router.post(
+    "/hitachi_elevator/smart_fill",
+    response_model=APIResponse[SmartFillData],
+    summary="智能填单",
+    tags=["智能填单"],
+)
+async def smart_fill(request: SmartFillRequest) -> APIResponse[SmartFillData]:
     try:
-        response = client.chat.completions.create(
-            model=os.getenv("OPENAI_MODEL", "gpt-4o"),
-            messages=[
-                {
-                    "role": "system",
-                    "content": "你是一个专业的信息提取助手，擅长从客服对话中提取关键信息。",
-                },
-                {
-                    "role": "user",
-                    "content": f"{instruction}\n\n对话内容：\n{conversation}",
-                },
-            ],
-            temperature=0.3,
+        conversation = "\n".join(
+            f"{turn.role}: {turn.text}" for turn in request.history
         )
-
-        result_text = response.choices[0].message.content
-        if not result_text:
-            return APIResponse(data=SmartFillData())
-        result_json = json.loads(result_text)
-
-        return APIResponse(data=SmartFillData(**result_json))
+        data = await extract_fields_from_conversation(conversation, request.call_type)
+        return APIResponse(data=data)
     except Exception as e:
-        return APIResponse(data=SmartFillData())
+        return APIResponse(data=get_default_fill_data())
