@@ -11,6 +11,9 @@ RUN pip install --upgrade pip && \
     pip install uv && \
     uv sync --frozen
 
+# Prefer the project venv binaries (python, uvicorn, etc.)
+ENV PATH="/app/.venv/bin:${PATH}"
+
 COPY . .
 
 ENV HOST=0.0.0.0 \
