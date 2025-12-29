@@ -1,0 +1,61 @@
+version: "3.8"
+
+services:
+  elasticsearch:
+    image: m.daocloud.io/docker.io/elasticsearch/elasticsearch:8.19.9
+    container_name: hitachi_elasticsearch
+    environment:
+      - discovery.type=single-node
+      - xpack.security.enabled=false
+      - "ES_JAVA_OPTS=-Xms512m -Xmx512m"
+    ports:
+      - "9200:9200"
+      - "9300:9300"
+    volumes:
+      - elasticsearch_data:/usr/share/elasticsearch/data
+    healthcheck:
+      test:
+        ["CMD-SHELL", "curl -f http://localhost:9200/_cluster/health || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+    networks:
+      - hitachi_network
+
+  api:
+    image: crpi-lxfoqbwevmx9mc1q.cn-chengdu.personal.cr.aliyuncs.com/yuyi_tech/hitachi_elevator:${IMAGE_TAG:-latest}
+    container_name: hitachi_api
+    ports:
+      - "${API_PORT:-8000}:8000"
+    environment:
+      - ES_HOST=elasticsearch:9200
+      - ES_USERNAME=elastic
+      - ES_PASSWORD=changeme
+      - SMALL_MODEL_BACKEND=xinference
+      - OPENAI_API_KEY=${OPENAI_API_KEY:-your-openai-api-key}
+      - OPENAI_BASE_URL=${OPENAI_BASE_URL:-https://api.openai.com/v1}
+      - OPENAI_MODEL=${OPENAI_MODEL:-gpt-4o}
+      - MINERU_TOKEN=${MINERU_TOKEN:-your-mineru-token}
+      - XINFERENCE_HOST=${XINFERENCE_HOST:-http://xinference:9997}
+      - TIE_EMBEDDING_URL=${TIE_EMBEDDING_URL:-http://tie-embedding:80}
+      - TIE_RERANK_URL=${TIE_RERANK_URL:-http://tie-rerank:80}
+      - TEI_API_KEY=${TEI_API_KEY:-your-tei-api-key}
+      - VLLM_URL=${VLLM_URL:-http://vllm-embedding:8000}
+      - VLLM_RERANK_URL=${VLLM_RERANK_URL:-http://vllm-rerank:8000}
+      - VLLM_API_KEY=${VLLM_API_KEY:-your-vllm-api-key}
+      - SILICONFLOW_TOKEN=${SILICONFLOW_TOKEN:-your-siliconflow-token}
+    depends_on:
+      elasticsearch:
+        condition: service_healthy
+    networks:
+      - hitachi_network
+    restart: unless-stopped
+
+volumes:
+  elasticsearch_data:
+    driver: local
+
+networks:
+  hitachi_network:
+    driver: bridge
