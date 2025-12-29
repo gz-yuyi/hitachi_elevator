@@ -21,5 +21,5 @@ ENV HOST=0.0.0.0 \
 
 EXPOSE 8000
 
-ENTRYPOINT ["python"]
+ENTRYPOINT ["uv", "run", "python"]
 CMD ["-m", "uvicorn", "src.app:app", "--host", "0.0.0.0", "--port", "8000"]
