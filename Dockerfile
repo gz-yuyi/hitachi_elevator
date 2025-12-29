@@ -14,8 +14,10 @@ RUN pip install --upgrade pip && \
 COPY . .
 
 ENV HOST=0.0.0.0 \
-    PORT=8000
+    PORT=8000 \
+    LOG_LEVEL=info
 
 EXPOSE 8000
 
-CMD ["python", "-m", "uvicorn", "src.app:app", "--host", "0.0.0.0", "--port", "8000"]
+ENTRYPOINT ["python", "-m", "uvicorn", "src.app:app"]
+CMD ["--host", "0.0.0.0", "--port", "8000"]
