@@ -908,6 +908,7 @@ async def match_sensitive_words(
     req: SensitiveMatchRequest,
 ) -> MatchSensitiveWordsResponse:
     """匹配敏感词"""
+    await ensure_index_exists()
     if not req.text.strip():
         return MatchSensitiveWordsResponse(code=400, msg="文本不能为空")
 
