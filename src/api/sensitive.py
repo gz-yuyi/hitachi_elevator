@@ -15,6 +15,8 @@ from ..providers import embedding, rerank
 
 # Elasticsearch配置
 ES_HOST = os.getenv("ES_HOST", "localhost:9200")
+if not ES_HOST.startswith(("http://", "https://")):
+    ES_HOST = f"http://{ES_HOST}"
 ES_USERNAME = os.getenv("ES_USERNAME", "elastic")
 ES_PASSWORD = os.getenv("ES_PASSWORD", "changeme")
 
@@ -945,3 +947,82 @@ async def match_sensitive_words(
 
     logger.info(f"敏感词匹配完成, 找到 {len(response_items)} 个匹配结果")
     return MatchSensitiveWordsResponse(data=response_items)
+
+
+async def run_integration_tests(
+    api_url: str | None = None, use_test_client: bool = False, verbose: bool = False
+) -> None:
+    """Run sensitive integration tests (minimal sanity checks)."""
+    import httpx
+    import click
+
+    if verbose:
+        click.echo(f"\n{'=' * 50}")
+        click.echo("Running Sensitive Integration Tests")
+        click.echo(f"API URL: {api_url or 'http://localhost:8000'}")
+        click.echo(f"Using TestClient: {use_test_client}")
+        click.echo(f"{'=' * 50}\n")
+
+    if use_test_client:
+        from ..app import app
+
+        client = httpx.AsyncClient(app=app, base_url="http://test")
+    else:
+        client = httpx.AsyncClient(base_url=api_url or "http://localhost:8000")
+
+    test_cases = [
+        {
+            "name": "basic match",
+            "path": "/hitachi_elevator/sensitive/match",
+            "payload": {
+                "type": "1",
+                "text": "投诉",
+                "use_rerank_filter_full_match": False,
+            },
+        }
+    ]
+
+    passed = 0
+    failed = 0
+
+    for i, test_case in enumerate(test_cases, 1):
+        try:
+            if verbose:
+                click.echo(f"\nTest {i}: {test_case['name']}")
+
+            response = await client.post(
+                test_case["path"], json=test_case["payload"], timeout=60
+            )
+
+            if response.status_code == 200:
+                result = response.json()
+                if result.get("code") == 200:
+                    passed += 1
+                    if verbose:
+                        click.echo("  ✓ Passed")
+                else:
+                    failed += 1
+                    if verbose:
+                        click.echo(
+                            f"  ✗ Failed - Code: {result.get('code')}, Msg: {result.get('msg')}"
+                        )
+            else:
+                failed += 1
+                if verbose:
+                    snippet = response.text[:200].replace("\n", " ")
+                    click.echo(
+                        f"  ✗ Failed - Status: {response.status_code}, Body: {snippet}"
+                    )
+        except Exception as e:
+            failed += 1
+            if verbose:
+                click.echo(f"  ✗ Error - {str(e)}")
+
+    if verbose:
+        click.echo(f"\n{'=' * 50}")
+        click.echo(f"Tests Passed: {passed}")
+        click.echo(f"Tests Failed: {failed}")
+        click.echo(f"{'=' * 50}\n")
+
+    if failed > 0:
+        raise click.ClickException("")

@@ -73,6 +73,7 @@ def test_group() -> None:
 @click.option("--verbose", is_flag=True, help="Show detailed test output")
 def test_all_command(api_url: str, use_test_client: bool, verbose: bool) -> None:
     """Run all integration tests."""
+    from click import ClickException
     from src.api.doc_parse import run_integration_tests as test_doc_parse
     from src.api.smart_fill import run_integration_tests as test_smart_fill
     from src.api.trapped_detect import run_integration_tests as test_trapped_detect
@@ -85,11 +86,19 @@ def test_all_command(api_url: str, use_test_client: bool, verbose: bool) -> None
         click.echo("=" * 50)
 
     async def run_all():
-        await test_doc_parse(api_url, use_test_client, verbose)
-        await test_smart_fill(api_url, use_test_client, verbose)
-        await test_trapped_detect(api_url, use_test_client, verbose)
-        await test_knowledge(api_url, use_test_client, verbose)
-        await test_sensitive(api_url, use_test_client, verbose)
+        async def run_test(func, name: str):
+            try:
+                await func(api_url, use_test_client, verbose)
+            except ClickException as e:
+                raise ClickException(f"{name} failed") from e
+            except Exception as e:
+                raise ClickException(f"{name} error: {e}") from e
+
+        await run_test(test_doc_parse, "doc_parse")
+        await run_test(test_smart_fill, "smart_fill")
+        await run_test(test_trapped_detect, "trapped_detect")
+        await run_test(test_knowledge, "knowledge")
+        await run_test(test_sensitive, "sensitive")
 
     asyncio.run(run_all())
 

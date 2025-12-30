@@ -204,6 +204,11 @@ async def run_integration_tests(
         click.echo(f"Using TestClient: {use_test_client}")
         click.echo(f"{'=' * 50}\n")
 
+    if not MINERU_TOKEN or MINERU_TOKEN == "your-mineru-token":
+        if verbose:
+            click.echo("Skipping doc_parse: MINERU_TOKEN not configured")
+        return
+
     if use_test_client:
         client = httpx.AsyncClient(base_url="http://test")
     else:
@@ -230,22 +235,24 @@ async def run_integration_tests(
     failed = 0
 
     for i, test_case in enumerate(test_cases, 1):
-        files = {
-            "file": (
-                test_case["filename"],
-                io.BytesIO(test_case["file_content"]),
-            ),
-            "file_type": test_case["file_type"],
-            "output_format": test_case["output_format"],
-        }
-
         try:
             if verbose:
                 click.echo(f"\nTest {i}: {test_case['name']}")
 
             response = await client.post(
                 "/hitachi_elevator/doc/parse",
-                files=files,
+                files={
+                    "file": (
+                        test_case["filename"],
+                        io.BytesIO(test_case["file_content"]),
+                        "application/pdf",
+                    ),
+                },
+                data={
+                    "file_name": test_case["filename"],
+                    "file_type": test_case["file_type"],
+                    "output_format": test_case["output_format"],
+                },
             )
 
             if response.status_code == 200:

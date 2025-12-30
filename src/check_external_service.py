@@ -3,6 +3,7 @@ import os
 
 import click
 import httpx
+from openai import AsyncOpenAI, OpenAIError
 
 
 async def check_elasticsearch() -> tuple[bool, str]:
@@ -45,23 +46,18 @@ async def check_openai() -> tuple[bool, str]:
 
     base_url = base_url.rstrip("/")
 
+    client = AsyncOpenAI(api_key=api_key, base_url=base_url, timeout=30)
+
     try:
-        async with httpx.AsyncClient(timeout=30) as client:
-            headers = {"Content-Type": "application/json"}
-            headers["Authorization"] = f"Bearer {api_key}"
-            response = await client.post(
-                f"{base_url}/chat/completions",
-                headers=headers,
-                json={
-                    "model": model,
-                    "messages": [{"role": "user", "content": "ping"}],
-                    "max_tokens": 1,
-                },
-            )
-            if response.status_code == 200:
-                return True, f"Connected (Model: {model})"
-            else:
-                return False, f"Failed with status {response.status_code}"
+        await client.chat.completions.create(
+            model=model,
+            messages=[{"role": "user", "content": "ping"}]
+        )
+        return True, f"Connected (Model: {model})"
+    except OpenAIError as e:
+        status = getattr(e, "status_code", None) or getattr(e, "http_status", None)
+        suffix = f" {status}" if status else ""
+        return False, f"Failed{suffix}: {str(e)}"
     except Exception as e:
         return False, f"Connection failed: {str(e)}"
 

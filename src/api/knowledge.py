@@ -531,3 +531,75 @@ async def route_search(
         return await knowledge_search(request)
     except Exception as e:
         return APIResponse(data=[], msg=str(e))
+
+
+async def run_integration_tests(
+    api_url: str | None = None, use_test_client: bool = False, verbose: bool = False
+) -> None:
+    """Run knowledge integration tests (minimal sanity checks)."""
+    import httpx
+    import click
+
+    if verbose:
+        click.echo(f"\n{'=' * 50}")
+        click.echo("Running Knowledge Integration Tests")
+        click.echo(f"API URL: {api_url or 'http://localhost:8000'}")
+        click.echo(f"Using TestClient: {use_test_client}")
+        click.echo(f"{'=' * 50}\n")
+
+    if use_test_client:
+        from ..app import app
+
+        client = httpx.AsyncClient(app=app, base_url="http://test")
+    else:
+        client = httpx.AsyncClient(base_url=api_url or "http://localhost:8000")
+
+    test_cases = [
+        {
+            "name": "need follow basic",
+            "path": "/hitachi_elevator/knowledge/need_follow",
+            "payload": {"text": "我要办证"},
+        }
+    ]
+
+    passed = 0
+    failed = 0
+
+    for i, test_case in enumerate(test_cases, 1):
+        try:
+            if verbose:
+                click.echo(f"\nTest {i}: {test_case['name']}")
+
+            response = await client.post(
+                test_case["path"], json=test_case["payload"], timeout=30
+            )
+
+            if response.status_code == 200:
+                result = response.json()
+                if result.get("code") == 200:
+                    passed += 1
+                    if verbose:
+                        click.echo("  ✓ Passed")
+                else:
+                    failed += 1
+                    if verbose:
+                        click.echo(
+                            f"  ✗ Failed - Code: {result.get('code')}, Msg: {result.get('msg')}"
+                        )
+            else:
+                failed += 1
+                if verbose:
+                    click.echo(f"  ✗ Failed - Status: {response.status_code}")
+        except Exception as e:
+            failed += 1
+            if verbose:
+                click.echo(f"  ✗ Error - {str(e)}")
+
+    if verbose:
+        click.echo(f"\n{'=' * 50}")
+        click.echo(f"Tests Passed: {passed}")
+        click.echo(f"Tests Failed: {failed}")
+        click.echo(f"{'=' * 50}\n")
+
+    if failed > 0:
+        raise click.ClickException("")
