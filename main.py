@@ -94,5 +94,11 @@ def test_all_command(api_url: str, use_test_client: bool, verbose: bool) -> None
     asyncio.run(run_all())
 
 
+cli.add_command(start_server)
+cli.add_command(export_openapi)
+cli.add_command(check_external_service_command)
+cli.add_command(test_group)
+
+
 if __name__ == "__main__":
     cli()
