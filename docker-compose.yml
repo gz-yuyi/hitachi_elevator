@@ -27,7 +27,7 @@ services:
       - ES_HOST=elasticsearch:9200
       - ES_USERNAME=elastic
       - ES_PASSWORD=changeme
-      - SMALL_MODEL_BACKEND=xinference
+      - SMALL_MODEL_BACKEND=${SMALL_MODEL_BACKEND:-xinference}
       - OPENAI_API_KEY=${OPENAI_API_KEY:-your-openai-api-key}
       - OPENAI_BASE_URL=${OPENAI_BASE_URL:-https://api.openai.com/v1}
       - OPENAI_MODEL=${OPENAI_MODEL:-gpt-4o}

@@ -33,16 +33,30 @@ async def check_elasticsearch() -> tuple[bool, str]:
 
 async def check_openai() -> tuple[bool, str]:
     api_key = os.getenv("OPENAI_API_KEY")
-    base_url = os.getenv("OPENAI_BASE_URL", "https://api.openai.com/v1")
-    model = os.getenv("OPENAI_MODEL", "gpt-4o")
+    base_url = os.getenv("OPENAI_BASE_URL")
+    model = os.getenv("OPENAI_MODEL")
 
     if not api_key:
-        return False, "API key not configured"
+        return False, "OPENAI_API_KEY not configured"
+    if not base_url:
+        return False, "OPENAI_BASE_URL not configured"
+    if not model:
+        return False, "OPENAI_MODEL not configured"
+
+    base_url = base_url.rstrip("/")
 
     try:
         async with httpx.AsyncClient(timeout=30) as client:
-            response = await client.get(
-                f"{base_url}/models", headers={"Authorization": f"Bearer {api_key}"}
+            headers = {"Content-Type": "application/json"}
+            headers["Authorization"] = f"Bearer {api_key}"
+            response = await client.post(
+                f"{base_url}/chat/completions",
+                headers=headers,
+                json={
+                    "model": model,
+                    "messages": [{"role": "user", "content": "ping"}],
+                    "max_tokens": 1,
+                },
             )
             if response.status_code == 200:
                 return True, f"Connected (Model: {model})"
