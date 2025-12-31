@@ -1,0 +1,6 @@
+services:
+  elasticsearch:
+    ports:
+      - "${ES_HTTP_PORT:-9200}:9200"
+      - "${ES_TRANSPORT_PORT:-9300}:9300"
+
