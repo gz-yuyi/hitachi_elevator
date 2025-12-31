@@ -183,6 +183,7 @@ async def route(
     output_fmt = output_format or "text"
 
     try:
+        file_content = await file.read()
         return await parse_document(file_content, name, file_type, output_fmt)
     except Exception as e:
         return error_response(name, file_type)

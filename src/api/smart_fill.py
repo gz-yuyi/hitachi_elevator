@@ -104,6 +104,7 @@ async def extract_fields_from_conversation(
   "contact_name": {"value": "", "evidence": ""},
   "contact_phone": {"value": "", "evidence": ""}
 }
+仅返回上述JSON，不要包含其它文字或前后缀。
 """
 
     response = await client.chat.completions.create(
@@ -118,7 +119,9 @@ async def extract_fields_from_conversation(
                 "content": f"{instruction}\n\n对话内容：\n{conversation}",
             },
         ],
-        temperature=0.3,
+        temperature=0.0,
+        top_p=0.0,
+        response_format={"type": "json_object"},
     )
 
     result_text = response.choices[0].message.content
