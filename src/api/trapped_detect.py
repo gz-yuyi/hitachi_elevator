@@ -1,6 +1,7 @@
 import json
 import os
 from typing import Literal
+import traceback
 
 import click
 import httpx
@@ -66,7 +67,7 @@ async def detect_trapped_event(role: str, text: str) -> TrappedDetectData:
   "evidence": "触发判断的关键短语"
 }
 
-要求：probability为0-1之间的浮点数，表示判断的置信度。"""
+要求：probability为0-1之间的浮点数，表示判断的置信度。仅返回上述JSON，不要包含其他文本。"""
 
     response = await client.chat.completions.create(
         model=os.getenv("OPENAI_MODEL", "gpt-4o"),
@@ -80,8 +81,9 @@ async def detect_trapped_event(role: str, text: str) -> TrappedDetectData:
                 "content": f"{instruction}\n\n对话内容（{role}）：{text}",
             },
         ],
-        temperature=0.1,
-        max_tokens=200,
+        temperature=0.0,
+        top_p=0.0,
+        response_format={"type": "json_object"},
     )
 
     result_text = response.choices[0].message.content
@@ -105,7 +107,12 @@ async def trapped_detect(
         data = await detect_trapped_event(request.role, request.text)
         return APIResponse(data=data)
     except Exception as e:
-        return APIResponse(data=get_default_trapped_data())
+        stack = traceback.format_exc()
+        return APIResponse(
+            code=500,
+            msg=f"{e}\n{stack}",
+            data=get_default_trapped_data(),
+        )
 
 
 async def run_integration_tests(
