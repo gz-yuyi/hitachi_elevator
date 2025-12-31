@@ -3,6 +3,7 @@ import io
 import json
 import os
 from typing import Literal
+import traceback
 
 import click
 import httpx
@@ -146,7 +147,12 @@ async def smart_fill(request: SmartFillRequest) -> APIResponse[SmartFillData]:
         data = await extract_fields_from_conversation(conversation, request.call_type)
         return APIResponse(data=data)
     except Exception as e:
-        return APIResponse(data=get_default_fill_data())
+        stack = traceback.format_exc()
+        return APIResponse(
+            code=500,
+            msg=f"{e}\n{stack}",
+            data=get_default_fill_data(),
+        )
 
 
 async def run_integration_tests(

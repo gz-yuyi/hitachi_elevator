@@ -1,6 +1,7 @@
 import asyncio
 import os
 import re
+import traceback
 from datetime import datetime
 from typing import Any, ClassVar, Optional
 
@@ -873,8 +874,9 @@ async def train_sensitive_words(req: SensitiveTrainRequest) -> APIResponse:
         return APIResponse(msg="训练成功")
 
     except Exception as e:
+        stack = traceback.format_exc()
         logger.exception(f"训练敏感词失败: {e!s}")
-        return APIResponse(code=500, msg=f"训练失败: {e!s}")
+        return APIResponse(code=500, msg=f"训练失败: {e!s}\n{stack}")
 
 
 @router.post(
@@ -894,8 +896,9 @@ async def delete_sensitive_words(req: SensitiveDeleteRequest) -> APIResponse:
         return APIResponse(msg="删除成功")
 
     except Exception as e:
+        stack = traceback.format_exc()
         logger.exception(f"删除敏感词失败: {e!s}")
-        return APIResponse(code=500, msg=f"删除失败: {e!s}")
+        return APIResponse(code=500, msg=f"删除失败: {e!s}\n{stack}")
 
 
 @router.post(

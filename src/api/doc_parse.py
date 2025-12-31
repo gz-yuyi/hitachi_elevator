@@ -1,8 +1,10 @@
 import asyncio
 import io
 import os
+import hashlib
 import zipfile
 from typing import Optional
+import traceback
 
 import click
 import httpx
@@ -84,9 +86,10 @@ async def parse_document(
     file_content: bytes, name: str, file_type: str | None, output_fmt: str
 ) -> APIResponse[DocParseData]:
     if not MINERU_TOKEN:
-        return error_response(name, file_type)
+        raise RuntimeError("MINERU_TOKEN is not configured")
 
-    data_id = name.replace(".", "_").replace(" ", "_")
+    digest = hashlib.sha1(name.encode("utf-8")).hexdigest()
+    data_id = f"file_{digest}"
 
     headers = {
         "Content-Type": "application/json",
@@ -107,18 +110,26 @@ async def parse_document(
         )
 
         if upload_resp.status_code != 200:
-            return error_response(name, file_type)
+            raise RuntimeError(
+                f"request upload urls failed, status={upload_resp.status_code}, body={upload_resp.text}"
+            )
 
         upload_result_json = upload_resp.json()
         if upload_result_json.get("code") != 0:
-            return error_response(name, file_type)
+            raise RuntimeError(
+                "request upload urls failed, "
+                f"code={upload_result_json.get('code')}, "
+                f"msg={upload_result_json.get('msg')}"
+            )
 
         batch_id = upload_result_json["data"]["batch_id"]
         upload_url = upload_result_json["data"]["file_urls"][0]
 
         upload_result = await client.put(upload_url, content=file_content)
         if upload_result.status_code != 200:
-            return error_response(name, file_type)
+            raise RuntimeError(
+                f"upload file failed, status={upload_result.status_code}"
+            )
 
     for _ in range(60):
         await asyncio.sleep(2)
@@ -150,7 +161,7 @@ async def parse_document(
 
             return await parse_zip_result(zip_url, name, file_type, output_fmt)
 
-    return error_response(name, file_type)
+    raise RuntimeError("parse document timed out or no extract_result available")
 
 
 @router.post(
@@ -186,7 +197,9 @@ async def route(
         file_content = await file.read()
         return await parse_document(file_content, name, file_type, output_fmt)
     except Exception as e:
-        return error_response(name, file_type)
+        stack = traceback.format_exc()
+        default_data = error_response(name, file_type).data
+        return APIResponse(code=500, msg=f"{e}\n{stack}", data=default_data)
 
 
 async def run_integration_tests(

@@ -1,5 +1,6 @@
 from fastapi import APIRouter
 from pydantic import BaseModel, ConfigDict, Field
+import traceback
 
 from ..es import es_client
 from ..models import APIResponse
@@ -302,7 +303,8 @@ async def route_upload(request: KnowledgeUploadRequest) -> APIResponse[None]:
     try:
         return await knowledge_upload(request)
     except Exception as e:
-        return APIResponse(msg=str(e))
+        stack = traceback.format_exc()
+        return APIResponse(code=500, msg=f"{e}\n{stack}")
 
 
 async def knowledge_delete(
@@ -324,7 +326,8 @@ async def route_delete(request: KnowledgeDeleteRequest) -> APIResponse[None]:
     try:
         return await knowledge_delete(request)
     except Exception as e:
-        return APIResponse(msg=str(e))
+        stack = traceback.format_exc()
+        return APIResponse(code=500, msg=f"{e}\n{stack}")
 
 
 async def knowledge_need_follow(
@@ -345,7 +348,12 @@ async def route_need_follow(
     try:
         return await knowledge_need_follow(request)
     except Exception as e:
-        return APIResponse(msg=str(e))
+        stack = traceback.format_exc()
+        return APIResponse(
+            code=500,
+            msg=f"{e}\n{stack}",
+            data=KnowledgeNeedFollowData(need_follow=False),
+        )
 
 
 async def knowledge_follow(
@@ -422,7 +430,8 @@ async def route_follow(
     try:
         return await knowledge_follow(request)
     except Exception as e:
-        return APIResponse(data=[], msg=str(e))
+        stack = traceback.format_exc()
+        return APIResponse(code=500, msg=f"{e}\n{stack}", data=[])
 
 
 async def knowledge_search(
@@ -530,7 +539,8 @@ async def route_search(
     try:
         return await knowledge_search(request)
     except Exception as e:
-        return APIResponse(data=[], msg=str(e))
+        stack = traceback.format_exc()
+        return APIResponse(code=500, msg=f"{e}\n{stack}", data=[])
 
 
 async def run_integration_tests(
