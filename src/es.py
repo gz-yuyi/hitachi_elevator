@@ -2,8 +2,15 @@ import os
 
 from elasticsearch import AsyncElasticsearch
 
+
+def normalize_host(raw_host: str) -> str:
+    if raw_host.startswith("http://") or raw_host.startswith("https://"):
+        return raw_host
+    return f"http://{raw_host}"
+
+
 # Elasticsearch配置
-ES_HOST = os.getenv("ES_HOST", "localhost:9200")
+ES_HOST = normalize_host(os.getenv("ES_HOST", "localhost:9200"))
 ES_USERNAME = os.getenv("ES_USERNAME", "elastic")
 ES_PASSWORD = os.getenv("ES_PASSWORD", "changeme")
 

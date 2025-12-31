@@ -11,6 +11,8 @@ BASE_URL = "https://api.siliconflow.cn/v1"
 
 TOKEN = os.getenv("SILICONFLOW_TOKEN")
 HEADERS = {"Authorization": f"Bearer {TOKEN}", "Content-Type": "application/json"}
+EMBED_MODEL = os.getenv("SILICONFLOW_EMBED_MODEL", "BAAI/bge-m3")
+EMBED_DIM = os.getenv("SILICONFLOW_EMBED_DIM", "1024")
 
 
 class RerankResponse(BaseModel):
@@ -160,13 +162,21 @@ class EmbeddingResponse(BaseModel):
 async def embedding(input_text: str) -> list[float]:
     url = f"{BASE_URL}/embeddings"
     payload = {
-        "model": "BAAI/bge-m3",
-        "input": input_text,
+        "model": EMBED_MODEL,
+        "input": [input_text],
+        "encoding_format": "float",
     }
+    if EMBED_DIM:
+        payload["dimensions"] = int(EMBED_DIM)
 
     async with (
         aiohttp.ClientSession() as session,
         session.post(url, json=payload, headers=HEADERS) as response,
     ):
         response_dict = await response.json()
-        return response_dict["data"][0]["embedding"]
+        if response.status != 200:
+            raise ValueError(
+                f"SiliconFlow embedding failed: {response.status} {response_dict}"
+            )
+        response_obj = EmbeddingResponse.model_validate(response_dict)
+        return response_obj.data[0].embedding
