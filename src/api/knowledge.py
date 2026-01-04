@@ -146,7 +146,7 @@ class KnowledgeFollowRequest(BaseModel):
     top_k: int = Field(default=4, description="返回数量")
     affair: str = Field(default="", description="当前关联事项")
     knowledge_type_name: str = Field(default="", description="知识分类名称(逗号分隔)")
-    is_bound_follow: bool = Field(default=False, description="是否已解绑")
+    is_bound_follow: bool | None = Field(default=None, description="是否已解绑")
     history: list[str] = Field(description="对话历史")
 
 
@@ -218,7 +218,7 @@ class KnowledgeSearchRequest(BaseModel):
     knowledge_type_name: str = Field(default="", description="知识分类名称")
     knowledge_type_path: str = Field(default="", description="知识分类路径")
     label: str = Field(default="", description="标签")
-    is_bound_follow: bool = Field(default=False, description="是否已解绑")
+    is_bound_follow: bool | None = Field(default=None, description="是否已解绑")
     page_size: int = Field(default=15, description="每页数量")
     page_num: int = Field(default=10, description="页码")
 
@@ -368,8 +368,8 @@ async def knowledge_follow(
     index_name = f"{KNOWLEDGE_INDEX_PREFIX}{request.knowledge_group}"
 
     must_filters = []
-    if request.is_bound_follow:
-        must_filters.append({"term": {"is_bound_follow": False}})
+    if request.is_bound_follow is not None:
+        must_filters.append({"term": {"is_bound_follow": request.is_bound_follow}})
     if request.affair:
         must_filters.append({"term": {"affair": request.affair}})
     if request.knowledge_type_name:
@@ -462,8 +462,8 @@ async def knowledge_search(
         must.append({"term": {"knowledge_type_name": request.knowledge_type_name}})
     if request.label:
         must.append({"term": {"label": request.label}})
-    if request.is_bound_follow:
-        must.append({"term": {"is_bound_follow": False}})
+    if request.is_bound_follow is not None:
+        must.append({"term": {"is_bound_follow": request.is_bound_follow}})
 
     filter_conditions = []
     if request.queue_name:
@@ -518,7 +518,8 @@ async def knowledge_search(
     for hit in hits:
         doc = hit["_source"]
         doc["score"] = hit["_score"]
-        doc["matched_terms"] = []
+        doc.setdefault("keywords", [])
+        doc.setdefault("matched_terms", [])
         results.append(KnowledgeFollowItem(**doc))
 
     return APIResponse(data=results)
