@@ -9,6 +9,7 @@ import traceback
 import click
 import httpx
 from fastapi import APIRouter, File, Form, UploadFile
+import pandas as pd
 from pydantic import BaseModel, Field
 
 from ..models import APIResponse
@@ -82,9 +83,72 @@ async def parse_zip_result(
     )
 
 
+def parse_excel_document(
+    file_content: bytes, name: str, file_type: str | None, output_fmt: str
+) -> APIResponse[DocParseData]:
+    """Parse Excel locally without MinerU."""
+    try:
+        sheets = pd.read_excel(io.BytesIO(file_content), sheet_name=None)
+    except Exception as e:
+        raise RuntimeError(f"parse excel failed: {e}") from e
+
+    if not sheets:
+        return APIResponse(
+            data=DocParseData(
+                file_name=name,
+                file_type=file_type or "xlsx",
+                page_count=0,
+                content="",
+                content_html=None,
+            )
+        )
+
+    text_parts: list[str] = []
+    markdown_parts: list[str] = []
+    html_parts: list[str] = []
+
+    for sheet_idx, (sheet_name, df) in enumerate(sheets.items()):
+        df = df.fillna("")
+        sheet_header = f"Sheet: {sheet_name}"
+        sheet_text = df.to_string(index=False)
+        if sheet_idx > 0:
+            text_parts.append("---SHEET_BREAK---")
+            markdown_parts.append("\n---SHEET_BREAK---\n")
+        text_parts.append(sheet_header)
+        text_parts.append(sheet_text)
+
+        if output_fmt == "html":
+            html_parts.append(f"<h3>{sheet_header}</h3>")
+            html_parts.append(df.to_html(index=False, border=0))
+        elif output_fmt == "markdown":
+            markdown_parts.append(f"### {sheet_header}")
+            markdown_parts.append(df.to_markdown(index=False, tablefmt="pipe"))
+
+    if output_fmt == "markdown":
+        content_text = "\n\n".join(markdown_parts)
+        content_html = None
+    else:
+        content_text = "\n".join(text_parts)
+        content_html = "\n".join(html_parts) if output_fmt == "html" else None
+
+    return APIResponse(
+        data=DocParseData(
+            file_name=name,
+            file_type=file_type or "xlsx",
+            page_count=len(sheets),
+            content=content_text,
+            content_html=content_html,
+        )
+    )
+
+
 async def parse_document(
     file_content: bytes, name: str, file_type: str | None, output_fmt: str
 ) -> APIResponse[DocParseData]:
+    ext = (file_type or name.split(".")[-1]).lower()
+    if ext in {"xlsx", "xls"}:
+        return parse_excel_document(file_content, name, file_type, output_fmt)
+
     if not MINERU_TOKEN:
         raise RuntimeError("MINERU_TOKEN is not configured")
 
