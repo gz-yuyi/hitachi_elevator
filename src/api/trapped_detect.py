@@ -84,6 +84,9 @@ async def detect_trapped_event(role: str, text: str) -> TrappedDetectData:
         temperature=0.0,
         top_p=0.0,
         response_format={"type": "json_object"},
+        extra_body={
+            "thinking": {"type": "disabled"},
+        },
     )
 
     result_text = response.choices[0].message.content

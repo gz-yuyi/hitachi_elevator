@@ -123,6 +123,9 @@ async def extract_fields_from_conversation(
         temperature=0.0,
         top_p=0.0,
         response_format={"type": "json_object"},
+        extra_body={
+            "thinking": {"type": "disabled"},
+        },
     )
 
     result_text = response.choices[0].message.content

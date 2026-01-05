@@ -377,11 +377,11 @@ async def knowledge_follow(
         must_filters.append({"terms": {"knowledge_type_name": type_names}})
 
     knn_query = {
-        "field": "content_vector",
-        "query_vector": query_vector,
-        "k": request.top_k * 2,
-        "num_candidates": 100,
-    }
+            "field": "content_vector",
+            "query_vector": query_vector,
+            "k": request.top_k * 2,
+            "num_candidates": 100,
+        }
     if must_filters:
         knn_query["filter"] = {"bool": {"must": must_filters}}
 
